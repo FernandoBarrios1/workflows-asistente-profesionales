@@ -1,36 +1,105 @@
 # workflows-asistente-profesionales
-Workflows de n8n desarrollados para el asistente de una empresa de servicios profesionales, como parte de un proyecto de tesis.
+Agente MyF - Sistema Automatizado de Gestión de Citas y Clientes
 
-# Workflows del asistente para despachos profesionales
+Este repositorio contiene los flujos de automatización y configuraciones de Agente MyF, un sistema diseñado para automatizar la gestión de clientes, agendamiento de citas, envío de recordatorios y reportes para entornos profesionales y comerciales.
 
-## Descripción
+📋 Descripción General
 
-Este repositorio contiene los workflows desarrollados en n8n como parte del proyecto de tesis, cuyo objetivo es implementar un asistente orientado a apoyar la gestión de tareas en despachos profesionales.
+Agente MyF es una solución basada en flujos de trabajo (workflows) que integra bases de datos, plataformas de mensajería/web y sistemas de agendamiento. Su objetivo principal es optimizar la atención al cliente, reducir las ausencias en citas programadas y facilitar el seguimiento contable/operativo mediante reportes periódicos.
 
-Los flujos permiten implementar las distintas funcionalidades y procesos de automatización que forman parte de la solución propuesta.
+🛠️ Arquitectura y Flujos del Sistema
 
-## Contenido del repositorio
+El proyecto se divide en módulos que gestionan aspectos específicos del proceso:
 
-Los archivos están organizados según las funcionalidades implementadas por el sistema.
+1. Gestión de Clientes
 
-Cada archivo JSON corresponde a un workflow exportado desde n8n y permite consultar su estructura, los nodos utilizados y las conexiones entre ellos.
+Consultar Clientes: Búsqueda y validación de la información de clientes existentes.
 
-## Requisitos
+Registrar Clientes: Alta de nuevos usuarios en el sistema.
 
-Para importar y examinar los workflows se requiere una instancia de n8n compatible con los nodos y las integraciones utilizados.
+Actualizar Clientes: Modificación de datos personales o de contacto.
 
-Algunos flujos pueden requerir la configuración de credenciales, variables de entorno o servicios externos para su ejecución.
+2. Gestión de Agendamientos y Citas
 
-## Importación de workflows
+Consultar Disponibilidad: Verificación de horarios libres en la agenda.
 
-1. Descargar el archivo JSON correspondiente.
-2. Acceder a la instancia de n8n.
-3. Importar el archivo mediante la opción de importación de workflows.
-4. Configurar las credenciales y los parámetros necesarios.
-5. Verificar las conexiones con los servicios externos antes de ejecutar el flujo.
+Registrar Agendamiento: Creación y confirmación de nuevas citas.
 
-## Alcance
+Actualizar / Reagendar Citas: Reprogramación flexible de turnos.
 
-Este repositorio se proporciona como material técnico complementario de la tesis, con el propósito de facilitar la consulta de los workflows implementados y permitir el examen de su estructura.
+Cancelar Agendamiento: Liberación de horarios previa cancelación del usuario.
 
-Las credenciales y los datos confidenciales no forman parte del material publicado.
+Consultar Agendamientos: Historial y estado actual de reservas.
+
+3. Automatizaciones y Notificaciones
+
+Recordatorios de Citas (24h Antes): Notificaciones automáticas previas para reducir el ausentismo.
+
+Agenda Diaria Profesional: Resumen diario enviado al profesional sobre los compromisos del día.
+
+Reporte Mensual de Citas: Generación automática de estadísticas e historial mensual de atención.
+
+Núcleo Agente MyF & Manejo de Errores: Módulos centrales de enrutamiento y control de excepciones para garantizar la estabilidad del sistema.
+
+📂 Estructura del Repositorio
+
+Agente MyF/
+├── UT Agente MyF/
+│   └── Agenda Diaria Profesional_v2.json
+├── Actualizar Agendamiento_v2.json
+├── Actualizar Clientes_v2.json
+├── Agente MyF_v2.json
+├── Cancelar Agendamiento_v2.json
+├── Consultar Agendamientos_v2.json
+├── Consultar Clientes_v2.json
+├── Consultar Disponibilidad_v2.json
+├── Manejo de Errores_v2.json
+├── MyF Web_v2.json
+├── Núcleo Agente MyF_v2.json
+├── Reagendar_v2.json
+├── Recordatorios de Citas - 24 Horas Antes_v2.json
+├── Registrar Agendamiento_v2.json
+├── Registrar Clientes_v2.json
+└── Reporte Mensual de Citas_v2.json
+
+
+🚀 Requisitos e Instalación
+
+Prerrequisitos
+
+Una instancia de n8n (versión recomendada v1.0.0 o superior) o motor compatible de ejecución de JSON.
+
+Credenciales configuradas para:
+
+Servicio de mensajería/notificaciones (WhatsApp / Telegram / Email / SMS).
+
+Base de datos o Hoja de Cálculo (Google Sheets, Airtable, PostgreSQL, etc.).
+
+Calendario (Google Calendar, Outlook Calendar, etc.).
+
+Pasos para Importar
+
+Clona o descarga este repositorio:
+
+git clone https://github.com/tu-usuario/agente-myf.git
+
+
+Accede a tu interfaz de administración de flujos (ej. n8n).
+
+Selecciona Import from File (Importar desde archivo) y carga cada uno de los archivos .json según el módulo que desees desplegar.
+
+Asigna las credenciales correspondientes a cada nodo dentro de la interfaz.
+
+Activa los flujos y verifica el canal de activación (Webhooks, Triggers de tiempo o Eventos).
+
+🔒 Consideraciones de Seguridad y Privacidad
+
+Por motivos de seguridad, no se incluyen tokens de API, contraseñas ni claves secretas en los archivos JSON de este repositorio. Las credenciales deben ser vinculadas localmente dentro del entorno donde se ejecuten los flujos.
+
+🎓 Autoría y Tesis
+
+Este desarrollo forma parte del proyecto de tesis de grado presentado para la carrera de Ingeniería en Informática en la Universidad del Norte sede Asunción. 
+
+Autores: Fernando Barrios, Matías Cáceres 
+ 
+Año: 2026
