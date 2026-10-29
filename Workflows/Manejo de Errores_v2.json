@@ -1,0 +1,165 @@
+{
+  "name": "Manejo de Errores_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Manejo de Errores_v2\nWorkflow de errores de todos los _v2 (Settings → Error workflow). Guarda el error en `errores_workflow` y avisa por correo al administrador (cambiar el destinatario en 'Configuración').",
+        "height": 260,
+        "width": 520,
+        "color": 7
+      },
+      "id": "ac167fe5-3861-52a6-ab5b-8391a11a67d4",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c11d1c8a-2807-53cf-a868-a560132b9672",
+      "name": "Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fe6e5b16-d7a0-56b1-b6bd-7848046394fc",
+              "name": "admin_correo",
+              "value": "ejemplo@gmail.com",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "96050d5e-b519-51ef-942f-9bea0daff0e6",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nINSERT INTO errores_workflow (workflow, workflow_id, nodo, mensaje, ejecucion_id, url)\nSELECT j->>'workflow', j->>'workflow_id', j->>'nodo', j->>'mensaje', j->>'ejecucion_id', j->>'url' FROM p\nRETURNING id",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ workflow: $json.workflow?.name, workflow_id: $json.workflow?.id, nodo: $json.execution?.lastNodeExecuted, mensaje: $json.execution?.error?.message, ejecucion_id: $json.execution?.id, url: $json.execution?.url }) }}"
+        }
+      },
+      "id": "d335a7f7-b3d5-56f3-a89b-aabfd42b2f89",
+      "name": "Guardar Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Configuración').first().json.admin_correo }}",
+        "subject": "={{ '⚠️ Error en ' + $('Configuración').first().json.workflow?.name }}",
+        "message": "={{ '<p><b>Workflow:</b> ' + $('Configuración').first().json.workflow?.name + '</p><p><b>Nodo:</b> ' + $('Configuración').first().json.execution?.lastNodeExecuted + '</p><p><b>Error:</b> ' + ($('Configuración').first().json.execution?.error?.message ?? '').replace(/</g, '&lt;') + '</p><p><a href=\"' + $('Configuración').first().json.execution?.url + '\">Ver ejecución</a></p>' }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "132ff9fe-1481-53ec-98e1-6bae0d7db0d0",
+      "name": "Avisar al Administrador",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "webhookId": "aab95507-22e3-5209-ab88-cb2310b4c799",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Z8vWq5rtMy1SJVac",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Guardar Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Error": {
+      "main": [
+        [
+          {
+            "node": "Avisar al Administrador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "availableInMCP": false
+  },
+  "versionId": "a518e251-1f2e-4362-8efd-1089beda9d32",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "vbDQAibUnNHQPwRg",
+  "tags": []
+}

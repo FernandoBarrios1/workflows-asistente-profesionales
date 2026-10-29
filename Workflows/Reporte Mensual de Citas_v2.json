@@ -1,0 +1,241 @@
+{
+  "name": "Reporte Mensual de Citas_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reporte Mensual_v2\nÚltimo día del mes 07:00 (hora de Asunción). Además de las citas, incluye la sección **Tiempos de respuesta del asistente** a partir de `metricas_operaciones`.\n\nLas citas pasadas que siguen en 'P' se muestran como *Sin registrar asistencia* (ningún workflow marca S/N todavía).",
+        "height": 300,
+        "width": 560,
+        "color": 7
+      },
+      "id": "9af6c3b2-bc97-5b3b-aecb-4c24b8beacc9",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 28-31 * *"
+            }
+          ]
+        }
+      },
+      "id": "43877703-a787-5de2-ac26-6ec101ef2073",
+      "name": "Días 28 a 31, 7AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1933bf6-af8d-5c27-ae59-2af7974c9847",
+              "leftValue": "={{ $now.setZone('America/Asuncion').plus({ days: 1 }).day === 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2556c20e-8503-5710-8bf5-7c7d0ffda6d5",
+      "name": "¿Es el último día?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bbc7c78a-6378-54fb-88bf-d4cf517eec3d",
+              "name": "destinatario",
+              "value": "ejemplo@gmail.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ecda806e-c39d-5102-b1c5-a37bc31938a9",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH mes AS (SELECT date_trunc('month', now() AT TIME ZONE 'America/Asuncion')::date AS ini),\nc AS (\n  SELECT a.*, cl.nombre, cl.apellido,\n         CASE WHEN a.asistencia = 'P' AND a.fecha < (now() AT TIME ZONE 'America/Asuncion')::date THEN 'R' ELSE a.asistencia END AS estado\n  FROM agendamientos a, mes\n  LEFT JOIN LATERAL (SELECT nombre, apellido FROM clientes x WHERE x.cedula = a.cedula ORDER BY id_cliente LIMIT 1) cl ON true\n  WHERE a.fecha >= mes.ini AND a.fecha < mes.ini + interval '1 month'\n),\nm AS (\n  SELECT operacion, count(*) AS total, round(avg(duracion_ms)) AS promedio_ms,\n         percentile_cont(0.95) WITHIN GROUP (ORDER BY duracion_ms)::int AS p95_ms,\n         round(100.0 * count(*) FILTER (WHERE exito) / count(*), 1) AS pct_exito\n  FROM metricas_operaciones, mes\n  WHERE inicio >= mes.ini AND inicio < mes.ini + interval '1 month'\n  GROUP BY operacion\n)\nSELECT to_char((SELECT ini FROM mes), 'MM/YYYY') AS mes,\n  (SELECT count(*) FROM c) AS total,\n  (SELECT count(*) FROM c WHERE estado = 'S') AS asistieron,\n  (SELECT count(*) FROM c WHERE estado = 'N') AS ausentes,\n  (SELECT count(*) FROM c WHERE estado = 'P') AS pendientes,\n  (SELECT count(*) FROM c WHERE estado = 'R') AS sin_registrar,\n  (SELECT count(*) FROM c WHERE estado = 'C') AS canceladas,\n  (SELECT COALESCE(json_agg(json_build_object('nombre', COALESCE(nombre, ''), 'apellido', COALESCE(apellido, ''),\n      'cedula', cedula, 'fecha', to_char(fecha, 'DD/MM/YYYY'), 'hora_inicio', hora_inicio, 'area', area,\n      'descripcion', COALESCE(descripcion, ''), 'estado', estado) ORDER BY fecha, hora_inicio), '[]') FROM c) AS citas,\n  (SELECT COALESCE(json_agg(m ORDER BY m.total DESC), '[]') FROM m) AS metricas",
+        "options": {}
+      },
+      "id": "ad3e6c96-29a9-5588-9d6e-c38ed53a41e7",
+      "name": "Datos del Mes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: tablas HTML con bucles (citas y métricas) y escape de texto; no hay nodo nativo que lo arme.\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst d = $input.first().json;\nconst n = (k) => Number(d[k]) || 0;\nconst parse = (v) => (Array.isArray(v) ? v : JSON.parse(v || '[]'));\nconst citas = parse(d.citas);\nconst metricas = parse(d.metricas);\nconst tasa = n('asistieron') + n('ausentes') ? Math.round((100 * n('asistieron')) / (n('asistieron') + n('ausentes'))) : 0;\nconst estados = { S: ['Asistió', '#137333', '#e6f4ea'], N: ['Ausente', '#c5221f', '#fce8e6'], P: ['Pendiente', '#8c6700', '#fef9e7'],\n  R: ['Sin registrar', '#8c6700', '#fef3e0'], C: ['Cancelada', '#5f6368', '#f1f3f4'] };\nconst nombresOp = { respuesta_agente: 'Respuesta completa del asistente', registrar_agendamiento: 'Agendar cita',\n  consultar_disponibilidad: 'Consultar disponibilidad', consultar_agendamientos: 'Consultar citas', consultar_cliente: 'Verificar cliente',\n  registrar_cliente: 'Registrar cliente', actualizar_cliente: 'Actualizar cliente', cancelar_agendamiento: 'Cancelar cita',\n  reagendar: 'Reagendar cita', actualizar_agendamiento: 'Modificar cita' };\nconst td = 'padding:8px 12px;border-bottom:1px solid #e0e0e0;font-size:13px;';\nconst th = (t) => `<th style=\"padding:10px 12px;text-align:left;font-size:12px;color:#555;\">${t}</th>`;\nconst tarjeta = (v, t, c, bg) => `<td style=\"background:${bg};padding:14px;border-radius:8px;text-align:center;\"><div style=\"font-size:24px;font-weight:bold;color:${c};\">${v}</div><div style=\"color:#555;font-size:11px;\">${t}</div></td>`;\nconst filas = citas.map((c) => { const [l, col, bg] = estados[c.estado] || [c.estado, '#333', '#eee'];\n  return `<tr><td style=\"${td}\">${esc(c.nombre)} ${esc(c.apellido)}</td><td style=\"${td}\">${esc(c.cedula)}</td><td style=\"${td}\">${c.fecha}</td><td style=\"${td}\">${c.hora_inicio}</td><td style=\"${td}\">${esc(c.area)}</td><td style=\"${td}\">${esc(c.descripcion)}</td><td style=\"${td}text-align:center;\"><span style=\"padding:3px 10px;border-radius:12px;font-size:11px;font-weight:bold;background:${bg};color:${col};\">${l}</span></td></tr>`; }).join('');\nconst segundos = (ms) => (Number(ms) / 1000).toFixed(1) + ' s';\nconst filasM = metricas.map((m) => `<tr><td style=\"${td}\">${nombresOp[m.operacion] || esc(m.operacion)}</td><td style=\"${td}text-align:right;\">${m.total}</td><td style=\"${td}text-align:right;\">${segundos(m.promedio_ms)}</td><td style=\"${td}text-align:right;\">${segundos(m.p95_ms)}</td><td style=\"${td}text-align:right;\">${m.pct_exito}%</td></tr>`).join('');\nconst html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#f5f5f5;\">'\n  + `<div style=\"background:#1a73e8;padding:24px 30px;\"><div style=\"color:white;font-size:22px;font-weight:bold;\">MYF Consultoría</div><div style=\"color:#c8d8f8;font-size:13px;\">Reporte mensual de citas — ${d.mes}</div></div>`\n  + '<div style=\"background:white;border:1px solid #e0e0e0;border-top:none;padding:30px;\">'\n  + '<table cellspacing=\"6\" style=\"width:100%;margin-bottom:20px;\"><tr>'\n  + tarjeta(n('total'), 'Total', '#1a73e8', '#e8f0fe') + tarjeta(n('asistieron'), 'Asistieron', '#137333', '#e6f4ea')\n  + tarjeta(n('ausentes'), 'Ausentes', '#c5221f', '#fce8e6') + tarjeta(n('pendientes'), 'Pendientes', '#8c6700', '#fef9e7')\n  + tarjeta(n('sin_registrar'), 'Sin registrar', '#8c6700', '#fef3e0') + tarjeta(n('canceladas'), 'Canceladas', '#5f6368', '#f1f3f4')\n  + `</tr></table><p style=\"color:#555;font-size:13px;\">Tasa de asistencia (sobre citas con asistencia registrada): <b style=\"color:#137333;\">${tasa}%</b></p>`\n  + '<h3 style=\"color:#333;font-size:15px;\">Tiempos de respuesta del asistente</h3>'\n  + `<table cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\"><thead><tr style=\"background:#f1f3f4;\">${th('Operación')}${th('Cantidad')}${th('Promedio')}${th('P95')}${th('Éxito')}</tr></thead><tbody>${filasM || `<tr><td colspan=\"5\" style=\"${td}text-align:center;color:#888;\">Sin métricas este mes</td></tr>`}</tbody></table>`\n  + '<h3 style=\"color:#333;font-size:15px;margin-top:28px;\">Detalle de citas</h3>'\n  + `<table cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\"><thead><tr style=\"background:#f1f3f4;\">${th('Cliente')}${th('Cédula')}${th('Fecha')}${th('Hora')}${th('Área')}${th('Descripción')}${th('Estado')}</tr></thead><tbody>${filas || `<tr><td colspan=\"7\" style=\"${td}text-align:center;color:#888;\">No hay citas este mes</td></tr>`}</tbody></table>`\n  + '<p style=\"color:#999;font-size:11px;margin-top:24px;\">Generado automáticamente — MYF Consultoría</p></div></body></html>';\nreturn [{ json: { html, asunto: `Reporte mensual de citas — ${d.mes}` } }];\n"
+      },
+      "id": "5b7023b9-7643-5cf3-a52b-42a90210846e",
+      "name": "Generar Reporte HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "notesInFlow": false,
+      "notes": "Why Code: tablas HTML con bucles y escape de texto"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Configuración').first().json.destinatario }}",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a565dd20-8d42-563c-8374-ef56df06211d",
+      "name": "Enviar Reporte",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "0f1a2b3c-4d5e-4f6a-9b7c-8d9e0f1a2b3c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Z8vWq5rtMy1SJVac",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Días 28 a 31, 7AM": {
+      "main": [
+        [
+          {
+            "node": "¿Es el último día?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es el último día?": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Datos del Mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos del Mes": {
+      "main": [
+        [
+          {
+            "node": "Generar Reporte HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Reporte HTML": {
+      "main": [
+        [
+          {
+            "node": "Enviar Reporte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "4e2e5f24-3f19-46db-8eec-74a80126e122",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "2jJcU1yEn7saQzvt",
+  "tags": []
+}

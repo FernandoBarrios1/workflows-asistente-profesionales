@@ -1,0 +1,883 @@
+{
+  "name": "Reagendar_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reagendar_v2\nSin sub-agente de IA. Mueve la cita con un UPDATE atómico (verifica choque del área y del cliente en el nuevo horario, excluyendo la propia cita) y luego **actualiza** el evento de Calendar en vez de borrar y crear (antes podía perderse la cita).\n\n**Entrada:** cedula, fecha_actual, hora_inicio_actual, area_actual, nueva_fecha, nueva_hora_inicio, nueva_descripcion (opcional), canal, session_id\n\n**Salida:** `{success, codigo: actualizado | cita_no_encontrada | horario_ocupado | cliente_ocupado | datos_invalidos | error_bd, mensaje, datos}`",
+        "height": 380,
+        "width": 640,
+        "color": 7
+      },
+      "id": "ab8f4ad2-fbf5-5a5d-be67-45dbff1591ba",
+      "name": "Contrato",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "cedula"
+            },
+            {
+              "name": "fecha_actual"
+            },
+            {
+              "name": "hora_inicio_actual"
+            },
+            {
+              "name": "area_actual"
+            },
+            {
+              "name": "nueva_fecha"
+            },
+            {
+              "name": "nueva_hora_inicio"
+            },
+            {
+              "name": "nueva_descripcion"
+            },
+            {
+              "name": "canal"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "id": "f5cfff8c-7040-5e82-b91a-fab532c43761",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: valida y normaliza todos los campos de entrada en un solo paso\n// (formato, día hábil, horario permitido, longitudes). Con nodos nativos\n// serían 6+ IF/Set encadenados por campo.\nconst ZONA = 'America/Asuncion';\nconst HORARIOS = ['07:00', '08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00'];\nconst ahora = DateTime.now().setZone(ZONA);\nconst hoy = ahora.toISODate();\nconst e = $input.first().json;\nconst faltan = [];\nconst errores = [];\nconst txt = (v) => (v === undefined || v === null ? '' : String(v).trim());\n\nfunction leerCedula(campo, requerido = true) {\n  const v = txt(e[campo]).replace(/\\D/g, '');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length < 3 || v.length > 10) errores.push(`${campo}: debe tener entre 3 y 10 dígitos`);\n  return v;\n}\n\nfunction leerFecha(campo, requerido = true) {\n  let v = txt(e[campo]);\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  const dmy = v.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);\n  if (dmy) v = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !DateTime.fromISO(v, { zone: ZONA }).isValid) {\n    errores.push(`${campo}: \"${txt(e[campo])}\" no es una fecha válida, usar YYYY-MM-DD`);\n    return '';\n  }\n  return v;\n}\n\nfunction problemaDiaHabil(fecha) {\n  if (!fecha) return '';\n  const d = DateTime.fromISO(fecha, { zone: ZONA });\n  if (fecha < hoy) return `la fecha ${fecha} ya pasó`;\n  if (d.weekday > 5) return `el ${fecha} es ${d.setLocale('es').toFormat('cccc')} y solo se atiende de lunes a viernes`;\n  return '';\n}\n\nfunction leerHora(campo, requerido = true) {\n  const v = txt(e[campo]);\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  const m = v.match(/^(\\d{1,2})(?::(\\d{2}))?(?::\\d{2})?\\s*(?:hs?)?$/i);\n  const h = m ? `${m[1].padStart(2, '0')}:${m[2] || '00'}` : v;\n  if (!HORARIOS.includes(h)) errores.push(`${campo}: \"${v}\" no es un horario de cita (${HORARIOS.join(', ')})`);\n  return h;\n}\n\nfunction horaPasada(fecha, hora) {\n  return fecha === hoy && hora && hora <= ahora.toFormat('HH:mm');\n}\n\nfunction leerArea(campo, requerido = true) {\n  const v = txt(e[campo]).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.includes('soporte') || v.includes('manten')) return 'Soporte y Mantenimiento';\n  if (v.includes('consult') || v.includes('general')) return 'Consultoría General';\n  errores.push(`${campo}: área \"${txt(e[campo])}\" desconocida, usar \"Consultoría General\" o \"Soporte y Mantenimiento\"`);\n  return '';\n}\n\nfunction leerTexto(campo, max, requerido = true) {\n  const v = txt(e[campo]).replace(/[<>]/g, '').replace(/\\s+/g, ' ');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length > max) errores.push(`${campo}: máximo ${max} caracteres`);\n  return v;\n}\n\nfunction leerTelefono(campo, requerido = true) {\n  const v = txt(e[campo]).replace(/[^\\d+]/g, '');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length < 6 || v.length > 20) errores.push(`${campo}: teléfono inválido`);\n  return v;\n}\n\nfunction leerCorreo(campo, requerido = true) {\n  const v = txt(e[campo]).toLowerCase();\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length > 200 || !/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(v)) errores.push(`${campo}: correo inválido`);\n  return v;\n}\n\nconst masUnaHora = (h) => (h ? DateTime.fromFormat(h, 'HH:mm').plus({ hours: 1 }).toFormat('HH:mm') : '');\nconst legible = (f) => (f ? DateTime.fromISO(f, { zone: ZONA }).setLocale('es').toFormat(\"cccc d 'de' LLLL 'de' yyyy\") : '');\nconst iso = (f, h, minutos = 0) => (f && h ? DateTime.fromISO(`${f}T${h}`, { zone: ZONA }).plus({ minutes: minutos }).toISO() : '');\n\nfunction resultado(params, extra = {}) {\n  const valido = faltan.length === 0 && errores.length === 0;\n  const partes = [];\n  if (faltan.length) partes.push('Faltan datos: ' + faltan.join(', '));\n  if (errores.length) partes.push(errores.join('; '));\n  return [{ json: {\n    valido,\n    codigo: valido ? 'ok' : 'datos_invalidos',\n    mensaje: partes.join('. '),\n    campos_faltantes: faltan,\n    errores,\n    params,\n    ...extra,\n    canal: txt(e.canal),\n    session_id: txt(e.session_id),\n    inicio: ahora.toISO(),\n  } }];\n}\n\n// ----- validación específica de este workflow -----\n\nconst params = {\n  cedula: leerCedula('cedula'),\n  fecha_actual: leerFecha('fecha_actual'),\n  hora_inicio_actual: leerHora('hora_inicio_actual'),\n  area_actual: leerArea('area_actual'),\n  nueva_fecha: leerFecha('nueva_fecha'),\n  nueva_hora_inicio: leerHora('nueva_hora_inicio'),\n  nueva_descripcion: leerTexto('nueva_descripcion', 500, false),\n  nueva_area: '',\n};\nparams.nueva_hora_fin = masUnaHora(params.nueva_hora_inicio);\nconst motivo = problemaDiaHabil(params.nueva_fecha);\nif (motivo) errores.push(`nueva_fecha: ${motivo}`);\nif (horaPasada(params.nueva_fecha, params.nueva_hora_inicio)) errores.push(`nueva_hora_inicio: las ${params.nueva_hora_inicio} de hoy ya pasaron`);\nif (params.fecha_actual === params.nueva_fecha && params.hora_inicio_actual === params.nueva_hora_inicio) errores.push('la nueva fecha y hora son iguales a las actuales');\nreturn resultado(params, {\n  fecha_legible: legible(params.nueva_fecha),\n  fecha_actual_legible: legible(params.fecha_actual),\n  inicio_iso: iso(params.nueva_fecha, params.nueva_hora_inicio),\n  fin_iso: iso(params.nueva_fecha, params.nueva_hora_fin),\n  buscar_desde: iso(params.fecha_actual, params.hora_inicio_actual, -1),\n  buscar_hasta: iso(params.fecha_actual, params.hora_inicio_actual, 61),\n});\n"
+      },
+      "id": "0530ae4e-b299-58ac-887f-bd333a3d90c6",
+      "name": "Validar Entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "notesInFlow": false,
+      "notes": "Why Code: validación y normalización de varios campos en un solo nodo"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cb0c35c6-8f1a-5953-b8f6-57895b402848",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f2bc31cf-b32e-596b-9097-17266f227cdc",
+      "name": "¿Datos válidos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "43e6420c-36d6-54c2-a945-8269c3470ce1",
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "129e82a3-164f-53ea-8ffd-26b5dd475e98",
+              "name": "codigo",
+              "value": "={{ $json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "45b2dd17-2f3d-577d-a4ea-9bde78d0790c",
+              "name": "mensaje",
+              "value": "={{ 'No se pudo procesar la solicitud. ' + $json.mensaje + '. Pedile al cliente el dato que falta o corregido.' }}",
+              "type": "string"
+            },
+            {
+              "id": "90fe7130-0e39-55b8-89dc-1130f52b04c9",
+              "name": "datos",
+              "value": "={{ { campos_faltantes: $json.campos_faltantes, errores: $json.errores } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0bc33dea-36fb-5623-9168-4971e128ade0",
+      "name": "Resp: Datos inválidos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j),\nv AS (\n  SELECT j->>'cedula' AS cedula,\n         (j->>'fecha_actual')::date AS fecha_actual, j->>'hora_inicio_actual' AS hora_actual,\n         j->>'area_actual' AS area_actual,\n         (j->>'nueva_fecha')::date AS nueva_fecha, j->>'nueva_hora_inicio' AS nueva_hora,\n         j->>'nueva_hora_fin' AS nueva_hora_fin,\n         NULLIF(j->>'nueva_descripcion', '') AS nueva_descripcion,\n         NULLIF(j->>'nueva_area', '') AS nueva_area\n  FROM p\n),\nt AS (\n  SELECT a.* FROM agendamientos a, v\n  WHERE a.cedula = v.cedula AND a.fecha = v.fecha_actual AND a.hora_inicio = v.hora_actual\n    AND a.area = v.area_actual AND a.asistencia = 'P'\n  ORDER BY a.id LIMIT 1\n),\nchk AS (\n  SELECT\n    EXISTS (SELECT 1 FROM t) AS encontrada,\n    EXISTS (SELECT 1 FROM agendamientos a, v, t\n            WHERE a.id <> t.id AND a.asistencia <> 'C' AND a.fecha = v.nueva_fecha\n              AND a.hora_inicio = v.nueva_hora AND a.area = COALESCE(v.nueva_area, t.area)) AS horario_ocupado,\n    EXISTS (SELECT 1 FROM agendamientos a, v, t\n            WHERE a.id <> t.id AND a.asistencia <> 'C' AND a.fecha = v.nueva_fecha\n              AND a.hora_inicio = v.nueva_hora AND a.cedula = v.cedula) AS cliente_ocupado\n),\nupd AS (\n  UPDATE agendamientos a SET\n    fecha = v.nueva_fecha, hora_inicio = v.nueva_hora, hora_fin = v.nueva_hora_fin,\n    descripcion = COALESCE(v.nueva_descripcion, a.descripcion),\n    area = COALESCE(v.nueva_area, a.area), updated_at = now()\n  FROM v, t, chk\n  WHERE a.id = t.id AND NOT chk.horario_ocupado AND NOT chk.cliente_ocupado\n  RETURNING a.id, a.event_id, to_char(a.fecha, 'YYYY-MM-DD') AS fecha, a.hora_inicio, a.hora_fin,\n            a.descripcion, a.area\n)\nSELECT chk.encontrada, chk.horario_ocupado, chk.cliente_ocupado,\n       upd.id, upd.event_id, upd.fecha, upd.hora_inicio, upd.hora_fin, upd.descripcion, upd.area,\n       to_char(v.fecha_actual, 'YYYY-MM-DD') AS fecha_anterior, v.hora_actual AS hora_anterior,\n       v.area_actual AS area_anterior, cl.nombre, cl.apellido, cl.correo\nFROM chk CROSS JOIN v\nLEFT JOIN upd ON true\nLEFT JOIN LATERAL (\n  SELECT nombre, apellido, correo FROM clientes c WHERE c.cedula = v.cedula ORDER BY id_cliente LIMIT 1\n) cl ON true",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('Validar Entrada').first().json.params) }}"
+        }
+      },
+      "id": "7adb0347-e54b-5cfa-9922-c7fc5a96a359",
+      "name": "Actualizar en BD",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "859deb5f-fdbe-5d84-8f21-d38edd8d6d78",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "77a056f8-a67b-5fe2-94e0-cecd02515f11",
+      "name": "¿Actualizada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c9ce92c6-25dc-5281-b179-c2dcffad5828",
+              "leftValue": "={{ !!$('Actualizar en BD').first().json.event_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "55a9ac1c-ccc7-5aee-807e-896d51e437ff",
+      "name": "¿Tiene event_id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "ejemplo@gmail.com",
+          "mode": "list",
+          "cachedResultName": "ejemplo@gmail.com"
+        },
+        "limit": 1,
+        "timeMin": "={{ $('Validar Entrada').first().json.buscar_desde }}",
+        "timeMax": "={{ $('Validar Entrada').first().json.buscar_hasta }}",
+        "options": {
+          "query": "={{ $('Validar Entrada').first().json.params.cedula }}"
+        }
+      },
+      "id": "e58ff680-8f32-5a08-8f9d-119e0062e0a9",
+      "name": "Buscar Evento en Calendario",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1440,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x35I6X2YqPaWAO5f",
+          "name": "Este si funciona"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "value": "ejemplo@gmail.com",
+          "mode": "list",
+          "cachedResultName": "ejemplo@gmail.com"
+        },
+        "eventId": "={{ $('Actualizar en BD').first().json.event_id || ($('Buscar Evento en Calendario').isExecuted ? ($('Buscar Evento en Calendario').first().json.id ?? '') : '') }}",
+        "updateFields": {
+          "description": "={{ '[' + $('Actualizar en BD').first().json.area + '] ' + $('Actualizar en BD').first().json.descripcion + ' | cedula:' + $('Validar Entrada').first().json.params.cedula }}",
+          "end": "={{ $('Validar Entrada').first().json.fin_iso }}",
+          "start": "={{ $('Validar Entrada').first().json.inicio_iso }}",
+          "summary": "={{ 'Cita - ' + $('Validar Entrada').first().json.params.cedula }}"
+        }
+      },
+      "id": "edf3ebf6-af6b-51b8-b42e-36b6d2259826",
+      "name": "Actualizar Evento",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1680,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "x35I6X2YqPaWAO5f",
+          "name": "Este si funciona"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nUPDATE agendamientos a\nSET event_id = COALESCE(NULLIF(p.j->>'event_id', ''), a.event_id)\nFROM p\nWHERE a.id = (p.j->>'id')::int\nRETURNING a.id, a.event_id",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ id: $('Actualizar en BD').first().json.id, event_id: $json.id ?? '' }) }}"
+        }
+      },
+      "id": "b90ec1b5-670d-5e1c-873d-41e4a6c99a95",
+      "name": "Guardar event_id",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8d2639f0-a3a5-5b8e-92ff-fd7d0514597d",
+              "leftValue": "={{ !!$('Actualizar en BD').first().json.correo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5a05985b-0a90-593e-882b-330e3ca95a78",
+      "name": "¿Tiene correo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Actualizar en BD').first().json.correo }}",
+        "subject": "Tu cita fue reagendada - MYF Consultoría",
+        "message": "=<html><body style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f5f5f5;\"><div style=\"background-color:#1a73e8;padding:24px 30px;border-radius:8px 8px 0 0;\"><h1 style=\"color:white;margin:0;font-size:22px;\">MYF Consultoría</h1></div><div style=\"background-color:#ffffff;padding:30px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0;\"><h2 style=\"color:#1a73e8;margin-top:0;\">🔄 Cita reagendada</h2><p style=\"color:#444;font-size:16px;\">Hola <strong>{{ $('Actualizar en BD').first().json.nombre }} {{ $('Actualizar en BD').first().json.apellido }}</strong>,</p><p style=\"color:#444;font-size:16px;\">Tu cita con <strong>MYF Consultoría</strong> fue modificada.</p><div style=\"background-color:#fce8e6;border-left:4px solid #c5221f;padding:16px 20px;margin:24px 0;border-radius:4px;\"><p style=\"margin:0;font-size:12px;color:#c5221f;font-weight:bold;\">ANTES</p><p style=\"margin:4px 0 0 0;font-size:15px;color:#333;\">📅 {{ $('Validar Entrada').first().json.fecha_actual_legible }} a las {{ $('Actualizar en BD').first().json.hora_anterior }} hs — {{ $('Actualizar en BD').first().json.area_anterior }}</p></div><div style=\"background-color:#e6f4ea;border-left:4px solid #137333;padding:16px 20px;margin:24px 0;border-radius:4px;\"><p style=\"margin:0;font-size:12px;color:#137333;font-weight:bold;\">AHORA</p><p style=\"margin:4px 0 0 0;font-size:15px;color:#333;\">📅 {{ $('Validar Entrada').first().json.fecha_legible }} a las {{ $('Actualizar en BD').first().json.hora_inicio }} hs — {{ $('Actualizar en BD').first().json.area }}</p><p style=\"margin:4px 0 0 0;font-size:14px;color:#555;\">📝 {{ $('Actualizar en BD').first().json.descripcion }}</p></div><p style=\"color:#555;font-size:14px;\">Si necesitás reagendar o cancelar tu cita, podés hacerlo a través de nuestro asistente virtual:</p><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:20px auto;width:100%;\"><tr>\n<td align=\"center\" style=\"padding:8px;\"><a href=\"https://myftesis.netlify.app/\" target=\"_blank\" style=\"display:inline-block;background-color:#1a73e8;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 20px;border-radius:6px;width:160px;text-align:center;\">🌐 Asistente Web</a></td>\n<td align=\"center\" style=\"padding:8px;\"><a href=\"https://t.me/MyFTesis_bot\" target=\"_blank\" style=\"display:inline-block;background-color:#229ED9;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 20px;border-radius:6px;width:160px;text-align:center;\">✈️ Telegram</a></td>\n</tr></table><hr style=\"border:none;border-top:1px solid #e0e0e0;margin:24px 0;\"><p style=\"color:#999;font-size:12px;margin:0;\">Mensaje automático de MYF Consultoría. Por favor no responder.</p></div></body></html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "f7b0848c-fa32-56ca-86a5-d28952a7cdb9",
+      "name": "Enviar Aviso",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2400,
+        -128
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "webhookId": "8c686a86-f166-5fc5-99b8-5e9e41fa4af6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Z8vWq5rtMy1SJVac",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "22388aaf-fc33-5c16-b731-1b7f4f965d8f",
+              "name": "success",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "6584d1ab-16fc-58c4-a28e-1f239498a8df",
+              "name": "codigo",
+              "value": "actualizado",
+              "type": "string"
+            },
+            {
+              "id": "94d1fe3a-6e78-5100-9507-55f95a829af9",
+              "name": "mensaje",
+              "value": "={{ 'Cita actualizada: ahora es el ' + $('Validar Entrada').first().json.fecha_legible + ' a las ' + $('Actualizar en BD').first().json.hora_inicio + ' hs en ' + $('Actualizar en BD').first().json.area + '.' + ($('Actualizar en BD').first().json.correo ? ' Se envió aviso por correo.' : '') }}",
+              "type": "string"
+            },
+            {
+              "id": "0006f73a-7708-58d2-bd82-e7d14967a840",
+              "name": "datos",
+              "value": "={{ { fecha_anterior: $('Actualizar en BD').first().json.fecha_anterior, hora_anterior: $('Actualizar en BD').first().json.hora_anterior, area_anterior: $('Actualizar en BD').first().json.area_anterior, fecha: $('Actualizar en BD').first().json.fecha, hora_inicio: $('Actualizar en BD').first().json.hora_inicio, hora_fin: $('Actualizar en BD').first().json.hora_fin, area: $('Actualizar en BD').first().json.area, descripcion: $('Actualizar en BD').first().json.descripcion, calendario_sincronizado: !!$('Actualizar Evento').first().json.id } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "971e951b-b291-5e93-8dd7-2d1a7f7d7bea",
+      "name": "Resp: Actualizada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c27e0006-8910-5248-b371-74cd6864d485",
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "78dc8983-fb45-52ad-a28a-b1f107dbf080",
+              "name": "codigo",
+              "value": "={{ !$json.encontrada ? 'cita_no_encontrada' : ($json.cliente_ocupado ? 'cliente_ocupado' : 'horario_ocupado') }}",
+              "type": "string"
+            },
+            {
+              "id": "21621544-b567-5808-a9ac-1d762938e382",
+              "name": "mensaje",
+              "value": "={{ !$json.encontrada ? 'No hay una cita activa con esa cédula, fecha, hora y área. Usá Consultar Agendamientos para ver los datos exactos.' : ($json.cliente_ocupado ? 'El cliente ya tiene otra cita en el nuevo horario. Ofrecé otro.' : 'El nuevo horario ya está ocupado en esa área. Consultá la disponibilidad y ofrecé otro.') }}",
+              "type": "string"
+            },
+            {
+              "id": "9040b2c4-dfbd-5db9-9d26-5a8c24472fcf",
+              "name": "datos",
+              "value": "={{ {} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "eaa9c02d-bdde-5509-bcdf-09209bc24a37",
+      "name": "Resp: No actualizada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "715cbd0d-fbde-5037-aa37-104f994443a8",
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "553d8085-e305-53df-9715-d1843a8e40a9",
+              "name": "codigo",
+              "value": "={{ JSON.stringify($json).includes('duplicate key') ? 'horario_ocupado' : 'error_bd' }}",
+              "type": "string"
+            },
+            {
+              "id": "cb1ae575-3a71-5051-b0a4-7accac903893",
+              "name": "mensaje",
+              "value": "={{ JSON.stringify($json).includes('duplicate key') ? 'Ese horario acaba de ser ocupado por otra reserva. Ofrecé otro horario.' : 'Error técnico al acceder a la base de datos. Pedí disculpas y sugerí intentar de nuevo en unos minutos.' }}",
+              "type": "string"
+            },
+            {
+              "id": "4587051a-f3d6-5771-a492-bd66ce552a2d",
+              "name": "datos",
+              "value": "={{ { error_tecnico: JSON.stringify($json).slice(0, 300) } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dd9ac82f-9f9a-5cc7-ada5-4867bc55f1d4",
+      "name": "Resp: Error de base de datos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "45877104-bccf-58ad-af4d-78f28c50a47f",
+              "name": "success",
+              "value": "={{ $json.success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "3f5924cc-e21a-5c62-a576-5905ba5e26a0",
+              "name": "codigo",
+              "value": "={{ $json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "d155c5ff-8ff3-505b-a194-05b95dff5651",
+              "name": "mensaje",
+              "value": "={{ $json.mensaje }}",
+              "type": "string"
+            },
+            {
+              "id": "d4fe46df-7e4e-592d-a63f-73de3bbc1613",
+              "name": "datos",
+              "value": "={{ $json.datos ?? {} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "08c08a70-70ad-57ff-98ad-12470b9ecdc4",
+      "name": "Respuesta",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nINSERT INTO metricas_operaciones\n  (operacion, workflow, canal, session_id, ejecucion_id, cedula, exito, codigo, mensaje, inicio, fin, detalle)\nSELECT j->>'operacion', j->>'workflow', NULLIF(j->>'canal', ''), NULLIF(j->>'session_id', ''),\n       j->>'ejecucion_id', NULLIF(j->>'cedula', ''), COALESCE((j->>'exito')::boolean, false),\n       j->>'codigo', left(j->>'mensaje', 2000),\n       COALESCE((j->>'inicio')::timestamptz, now()), GREATEST(COALESCE((j->>'fin')::timestamptz, now()), COALESCE((j->>'inicio')::timestamptz, now())),\n       j->'detalle'\nFROM p\nRETURNING id, duracion_ms",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ operacion: 'reagendar', workflow: $workflow.name, canal: $('Validar Entrada').first().json.canal, session_id: $('Validar Entrada').first().json.session_id, ejecucion_id: $execution.id, cedula: $('Validar Entrada').first().json.params.cedula ?? '', exito: $json.success, codigo: $json.codigo, mensaje: $json.mensaje, inicio: $('Validar Entrada').first().json.inicio, fin: $now.toISO(), detalle: $json.datos }) }}"
+        }
+      },
+      "id": "a6f12c43-6ac4-5f93-9333-c924f0cf5712",
+      "name": "Registrar Métrica",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3120,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d4ae9845-51dd-5048-8764-15befa0994f4",
+              "name": "success",
+              "value": "={{ $('Respuesta').first().json.success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "a6a399d4-90aa-5143-91f1-783cbfc69e65",
+              "name": "codigo",
+              "value": "={{ $('Respuesta').first().json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "e08af2af-3a9f-5b70-b972-0afd73372762",
+              "name": "mensaje",
+              "value": "={{ $('Respuesta').first().json.mensaje }}",
+              "type": "string"
+            },
+            {
+              "id": "b8beb87b-d710-5e64-ae58-9a3441141207",
+              "name": "datos",
+              "value": "={{ $('Respuesta').first().json.datos }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5b3a2a2c-98ed-5bd7-bafa-5ec8aae7e33e",
+      "name": "Return",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3360,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Validar Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Entrada": {
+      "main": [
+        [
+          {
+            "node": "¿Datos válidos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Datos válidos?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar en BD",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Datos inválidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar en BD": {
+      "main": [
+        [
+          {
+            "node": "¿Actualizada?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Error de base de datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Actualizada?": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene event_id?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: No actualizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene event_id?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Evento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar Evento en Calendario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Evento en Calendario": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Evento": {
+      "main": [
+        [
+          {
+            "node": "Guardar event_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar event_id": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene correo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene correo?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Aviso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Actualizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Aviso": {
+      "main": [
+        [
+          {
+            "node": "Resp: Actualizada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Registrar Métrica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Métrica": {
+      "main": [
+        [
+          {
+            "node": "Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Actualizada": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: No actualizada": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Error de base de datos": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Datos inválidos": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "5bd2a7d2-c7dd-478b-a425-b41537befc22",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "Hb1phnEhxwPnlWvX",
+  "tags": []
+}

@@ -1,0 +1,223 @@
+{
+  "name": "MyF Web_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## MyF Web_v2\nChat web embebido. Solo recibe el mensaje y llama al **Núcleo Agente MyF_v2**; si el núcleo falla responde un mensaje de contingencia en vez de quedar en silencio.\n\n- CORS restringido a https://myftesis.netlify.app\n- La URL del webhook es nueva: actualizar el embed del sitio al activar.",
+        "height": 300,
+        "width": 560,
+        "color": 7
+      },
+      "id": "aa36127f-d53c-5a85-a48b-ca2b094a0e1a",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "mode": "webhook",
+        "options": {
+          "allowedOrigins": "https://myftesis.netlify.app",
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "6e6a75e1-c880-5892-b41a-7c6531d3f5ac",
+      "name": "Chat Web",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b6d3f0a2-7c1e-4f5a-9b8e-2d4c6a8e0f12"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bwDWcD34BAopV3Qe",
+          "mode": "list",
+          "cachedResultName": "Núcleo Agente MyF_v2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "mensaje": "={{ $json.chatInput }}",
+            "session_id": "={{ $json.sessionId }}",
+            "canal": "web",
+            "nombre_contacto": "",
+            "inicio": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "mensaje",
+              "displayName": "mensaje",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "canal",
+              "displayName": "canal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "nombre_contacto",
+              "displayName": "nombre_contacto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d0c873fb-aaa4-5897-931f-73e7775a206c",
+      "name": "Núcleo Agente MyF",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d11c3598-e0bc-59a1-bbff-f362f6999935",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "478c7c1c-ab47-5cf5-9506-d2b2938a890a",
+      "name": "Respuesta",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "06ac97bd-b315-52a5-aadf-053e0011c63d",
+              "name": "output",
+              "value": "Disculpá, tuve un problema técnico. ¿Podés intentar de nuevo en unos minutos?",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ffc8d529-bbce-5ef2-bef2-4dcd56210879",
+      "name": "Respuesta de contingencia",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat Web": {
+      "main": [
+        [
+          {
+            "node": "Núcleo Agente MyF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Núcleo Agente MyF": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta de contingencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "207a2186-accc-4ba9-b8c1-72b2ec896eed",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "UFDxkKtibyPsBNmy",
+  "tags": []
+}

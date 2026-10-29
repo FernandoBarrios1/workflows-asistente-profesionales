@@ -1,0 +1,196 @@
+{
+  "name": "Agenda Diaria Profesional_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Agenda Diaria_v2\nLunes a viernes 07:00 (antes también fines de semana). Fecha calculada en hora de Asunción (la BD está en UTC). Destinatario configurable en 'Configuración'. Textos de clientes escapados para HTML.",
+        "height": 240,
+        "width": 520,
+        "color": 7
+      },
+      "id": "83be69f4-3293-5309-b945-83c593600b72",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "4bfc751f-7f7c-5999-bd97-bed6f13d90d5",
+      "name": "Lunes a Viernes 7AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b81cf91-f3c3-5ffe-8efb-8d6e8d47c816",
+              "name": "destinatario",
+              "value": "ejemplo@gmail.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00576bda-96a1-5072-99e2-031ac5b1847b",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH hoy AS (SELECT (now() AT TIME ZONE 'America/Asuncion')::date AS d)\nSELECT to_char(hoy.d, 'DD/MM/YYYY') AS fecha, EXTRACT(ISODOW FROM hoy.d)::int AS dia_semana, COUNT(a.id) AS total,\n       COALESCE(json_agg(json_build_object(\n         'cedula', a.cedula, 'nombre', COALESCE(cl.nombre, ''), 'apellido', COALESCE(cl.apellido, ''),\n         'telefono', COALESCE(cl.telefono, ''), 'hora_inicio', a.hora_inicio, 'hora_fin', a.hora_fin,\n         'descripcion', COALESCE(a.descripcion, ''), 'area', a.area) ORDER BY a.hora_inicio, a.area)\n         FILTER (WHERE a.id IS NOT NULL), '[]') AS citas\nFROM hoy\nLEFT JOIN agendamientos a ON a.fecha = hoy.d AND a.asistencia = 'P'\nLEFT JOIN LATERAL (SELECT nombre, apellido, telefono FROM clientes c WHERE c.cedula = a.cedula ORDER BY id_cliente LIMIT 1) cl ON true\nGROUP BY hoy.d",
+        "options": {}
+      },
+      "id": "04e9a071-049b-579a-baaf-c4f8f34a8fa6",
+      "name": "Citas del Día",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: arma una tabla HTML con un renglón por cita (bucle + escape HTML); el nodo HTML no permite iterar filas con estilos por renglón.\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst d = $input.first().json;\nconst dias = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];\nconst citas = Array.isArray(d.citas) ? d.citas : JSON.parse(d.citas || '[]');\nconst total = Number(d.total) || 0;\nconst celda = 'padding:10px 14px;font-size:14px;color:#555;';\nconst filas = citas.map((c, i) => `<tr style=\"background:${i % 2 ? '#f8f9fa' : '#ffffff'}\">`\n  + `<td style=\"${celda}font-weight:bold;color:#1a73e8;white-space:nowrap;\">${esc(c.hora_inicio)} - ${esc(c.hora_fin)}</td>`\n  + `<td style=\"${celda}\">${esc(c.nombre)} ${esc(c.apellido)}</td><td style=\"${celda}\">${esc(c.cedula)}</td>`\n  + `<td style=\"${celda}\">${esc(c.telefono)}</td><td style=\"${celda}\">${esc(c.area)}</td><td style=\"${celda}\">${esc(c.descripcion)}</td></tr>`).join('');\nconst vacio = '<tr><td colspan=\"6\" style=\"padding:30px;text-align:center;color:#888;\">No hay citas programadas para hoy.</td></tr>';\nconst th = (t) => `<th style=\"padding:10px 14px;text-align:left;font-size:12px;color:#555;\">${t}</th>`;\nconst html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#f5f5f5;\">'\n  + `<div style=\"background:#1a73e8;padding:20px 28px;\"><div style=\"color:white;font-size:20px;font-weight:bold;\">MYF Consultoría</div><div style=\"color:#c8d8f8;font-size:13px;margin-top:3px;\">Agenda del día — ${dias[d.dia_semana]} ${d.fecha}</div></div>`\n  + '<div style=\"background:white;border:1px solid #e0e0e0;border-top:none;padding:24px 28px;\">'\n  + `<p style=\"font-size:15px;color:#333;\"><b style=\"font-size:26px;color:#1a73e8;\">${total}</b> cita${total === 1 ? '' : 's'} pendiente${total === 1 ? '' : 's'} para hoy</p>`\n  + '<table cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;border:1px solid #e0e0e0;\">'\n  + `<thead><tr style=\"background:#f1f3f4;\">${th('Horario')}${th('Cliente')}${th('Cédula')}${th('Teléfono')}${th('Área')}${th('Descripción')}</tr></thead>`\n  + `<tbody>${filas || vacio}</tbody></table>`\n  + '<p style=\"color:#999;font-size:11px;margin-top:20px;\">Generado automáticamente a las 07:00 hs. — MYF Consultoría</p></div></body></html>';\nreturn [{ json: { html, total, asunto: `📋 Agenda del día — ${dias[d.dia_semana]} ${d.fecha} (${total} cita${total === 1 ? '' : 's'})` } }];\n"
+      },
+      "id": "f8f29e44-c231-513f-a93b-823ae56d9984",
+      "name": "Generar Agenda HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "notesInFlow": false,
+      "notes": "Why Code: tabla HTML con bucle por cita y escape de texto"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Configuración').first().json.destinatario }}",
+        "subject": "={{ $json.asunto }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "25b3654c-ffa8-5a69-b170-b3d4ec2559b5",
+      "name": "Enviar Agenda",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "9e0f1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Z8vWq5rtMy1SJVac",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lunes a Viernes 7AM": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Citas del Día",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Citas del Día": {
+      "main": [
+        [
+          {
+            "node": "Generar Agenda HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Agenda HTML": {
+      "main": [
+        [
+          {
+            "node": "Enviar Agenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "ff104d21-5fa1-4688-bee3-c9b68a470c4a",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "nwClVrRDfCFoSls3",
+  "tags": []
+}

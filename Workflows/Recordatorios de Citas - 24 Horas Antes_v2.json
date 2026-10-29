@@ -1,0 +1,253 @@
+{
+  "name": "Recordatorios de Citas - 24 Horas Antes_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Recordatorios_v2\nUna sola consulta trae las citas que empiezan en las próximas 24 h que tienen correo y todavía no recibieron recordatorio (antes: 3 consultas por cita). Solo se marca como enviado si Gmail respondió OK; si falla se reintenta en la próxima corrida. Misma clave que la v1 (cedula_fecha_hora), así no se duplican recordatorios.",
+        "height": 280,
+        "width": 560,
+        "color": 7
+      },
+      "id": "8e7262a5-b99f-5356-9c58-f5e402b7d7b6",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/10 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "a57c2317-f85f-533e-a77e-9c57f84aa169",
+      "name": "Cada 10 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.id, a.cedula, to_char(a.fecha, 'DD/MM/YYYY') AS fecha, a.hora_inicio, a.area,\n       replace(replace(replace(COALESCE(a.descripcion, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;') AS descripcion,\n       a.cedula || '_' || to_char(a.fecha, 'YYYY-MM-DD') || '_' || a.hora_inicio AS clave,\n       cl.nombre, cl.apellido, cl.correo\nFROM agendamientos a\nJOIN LATERAL (\n  SELECT nombre, apellido, correo FROM clientes c\n  WHERE c.cedula = a.cedula AND COALESCE(c.correo, '') <> ''\n  ORDER BY id_cliente LIMIT 1\n) cl ON true\nWHERE a.asistencia = 'P'\n  AND (a.fecha + a.hora_inicio::time) >  (now() AT TIME ZONE 'America/Asuncion')\n  AND (a.fecha + a.hora_inicio::time) <= (now() AT TIME ZONE 'America/Asuncion') + interval '24 hours'\n  AND NOT EXISTS (\n    SELECT 1 FROM recordatorios_enviados r\n    WHERE r.event_id = a.cedula || '_' || to_char(a.fecha, 'YYYY-MM-DD') || '_' || a.hora_inicio\n  )\nORDER BY a.fecha, a.hora_inicio",
+        "options": {}
+      },
+      "id": "746475a2-a8eb-5a77-ba05-7471dfacbd12",
+      "name": "Citas Sin Recordatorio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26b84c73-7f16-546c-9fd4-9e464b2f7d48",
+              "leftValue": "={{ !!$json.clave }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1f80f28d-dad1-57a2-845e-6bb2445c993b",
+      "name": "¿Hay citas pendientes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.correo }}",
+        "subject": "⏰ Recordatorio: tu cita en MYF Consultoría",
+        "message": "=<html><body style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f5f5f5;\"><div style=\"background-color:#1a73e8;padding:24px 30px;border-radius:8px 8px 0 0;\"><h1 style=\"color:white;margin:0;font-size:22px;\">MYF Consultoría</h1></div><div style=\"background-color:#ffffff;padding:30px;border-radius:0 0 8px 8px;border:1px solid #e0e0e0;\"><h2 style=\"color:#1a73e8;margin-top:0;\">⏰ Recordatorio de cita</h2><p style=\"color:#444;font-size:16px;\">Hola <strong>{{ $json.nombre }} {{ $json.apellido }}</strong>,</p><p style=\"color:#444;font-size:16px;\">Te recordamos que tenés una cita programada con <strong>MYF Consultoría</strong>.</p><div style=\"background-color:#e8f0fe;border-left:4px solid #1a73e8;padding:16px 20px;margin:24px 0;border-radius:4px;\"><p style=\"margin:0 0 8px 0;color:#1a1a1a;font-size:16px;\">📅 <strong>{{ $json.fecha }} a las {{ $json.hora_inicio }} hs</strong></p><p style=\"margin:0;color:#333;font-size:14px;\">📂 {{ $json.area }} — {{ $json.descripcion }}</p></div><p style=\"color:#555;font-size:14px;\">Si necesitás reagendar o cancelar tu cita, podés hacerlo a través de nuestro asistente virtual:</p><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:20px auto;width:100%;\"><tr>\n<td align=\"center\" style=\"padding:8px;\"><a href=\"https://myftesis.netlify.app/\" target=\"_blank\" style=\"display:inline-block;background-color:#1a73e8;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 20px;border-radius:6px;width:160px;text-align:center;\">🌐 Asistente Web</a></td>\n<td align=\"center\" style=\"padding:8px;\"><a href=\"https://t.me/MyFTesis_bot\" target=\"_blank\" style=\"display:inline-block;background-color:#229ED9;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 20px;border-radius:6px;width:160px;text-align:center;\">✈️ Telegram</a></td>\n</tr></table><hr style=\"border:none;border-top:1px solid #e0e0e0;margin:24px 0;\"><p style=\"color:#999;font-size:12px;margin:0;\">Mensaje automático de MYF Consultoría. Por favor no responder.</p></div></body></html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a91daaa2-21f0-5c25-bd73-ad494cfe1a65",
+      "name": "Enviar Recordatorio",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "webhookId": "8d9e0f1a-2b3c-4d5e-9f6a-7b8c9d0e1f2a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Z8vWq5rtMy1SJVac",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nINSERT INTO recordatorios_enviados (event_id, cedula)\nSELECT j->>'clave', j->>'cedula' FROM p\nON CONFLICT (event_id) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ clave: $('Citas Sin Recordatorio').item.json.clave, cedula: $('Citas Sin Recordatorio').item.json.cedula }) }}"
+        }
+      },
+      "id": "c3a60291-2b47-53c5-acdc-5e90ddd96a9c",
+      "name": "Marcar como Enviado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nINSERT INTO errores_workflow (workflow, workflow_id, nodo, mensaje, ejecucion_id)\nSELECT j->>'workflow', j->>'workflow_id', 'Enviar Recordatorio', j->>'mensaje', j->>'ejecucion_id' FROM p",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ workflow: $workflow.name, workflow_id: $workflow.id, ejecucion_id: $execution.id, mensaje: 'No se pudo enviar el recordatorio ' + $('Citas Sin Recordatorio').item.json.clave + ': ' + JSON.stringify($json.error ?? $json).slice(0, 300) }) }}"
+        }
+      },
+      "id": "90aa5ba1-0a34-515e-b3c4-719ad1399754",
+      "name": "Registrar Envío Fallido",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        720,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cada 10 minutos": {
+      "main": [
+        [
+          {
+            "node": "Citas Sin Recordatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Citas Sin Recordatorio": {
+      "main": [
+        [
+          {
+            "node": "¿Hay citas pendientes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay citas pendientes?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Recordatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Recordatorio": {
+      "main": [
+        [
+          {
+            "node": "Marcar como Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar Envío Fallido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "d05ad092-0abb-4436-b0fb-4334d9fb280f",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "MGuNv726wg6aelRU",
+  "tags": []
+}

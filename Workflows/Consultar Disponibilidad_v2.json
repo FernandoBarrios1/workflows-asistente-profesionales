@@ -1,0 +1,592 @@
+{
+  "name": "Consultar Disponibilidad_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Consultar Disponibilidad_v2\nÚnica fuente de verdad de días hábiles y horarios libres. Zona horaria fija America/Asuncion. Un área mal escrita se normaliza o se rechaza (antes devolvía todo libre).\n\n**Entrada:** fecha (YYYY-MM-DD o DD/MM/YYYY), area (opcional), canal, session_id\n\n**Salida:** `{success, codigo: ok | dia_no_habil | sin_horarios | datos_invalidos, mensaje, datos: {fecha, dia_semana, dia_habil, disponibilidad: {area: [horas]}, total_disponibles}}`",
+        "height": 380,
+        "width": 640,
+        "color": 7
+      },
+      "id": "4d2eba4f-54c4-5314-bb9b-e07ce2de048c",
+      "name": "Contrato",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "fecha"
+            },
+            {
+              "name": "area"
+            },
+            {
+              "name": "canal"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "id": "74394d24-2c83-5f20-88a4-c4d80be0fa37",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: valida y normaliza todos los campos de entrada en un solo paso\n// (formato, día hábil, horario permitido, longitudes). Con nodos nativos\n// serían 6+ IF/Set encadenados por campo.\nconst ZONA = 'America/Asuncion';\nconst HORARIOS = ['07:00', '08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00'];\nconst ahora = DateTime.now().setZone(ZONA);\nconst hoy = ahora.toISODate();\nconst e = $input.first().json;\nconst faltan = [];\nconst errores = [];\nconst txt = (v) => (v === undefined || v === null ? '' : String(v).trim());\n\nfunction leerCedula(campo, requerido = true) {\n  const v = txt(e[campo]).replace(/\\D/g, '');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length < 3 || v.length > 10) errores.push(`${campo}: debe tener entre 3 y 10 dígitos`);\n  return v;\n}\n\nfunction leerFecha(campo, requerido = true) {\n  let v = txt(e[campo]);\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  const dmy = v.match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{4})$/);\n  if (dmy) v = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v) || !DateTime.fromISO(v, { zone: ZONA }).isValid) {\n    errores.push(`${campo}: \"${txt(e[campo])}\" no es una fecha válida, usar YYYY-MM-DD`);\n    return '';\n  }\n  return v;\n}\n\nfunction problemaDiaHabil(fecha) {\n  if (!fecha) return '';\n  const d = DateTime.fromISO(fecha, { zone: ZONA });\n  if (fecha < hoy) return `la fecha ${fecha} ya pasó`;\n  if (d.weekday > 5) return `el ${fecha} es ${d.setLocale('es').toFormat('cccc')} y solo se atiende de lunes a viernes`;\n  return '';\n}\n\nfunction leerHora(campo, requerido = true) {\n  const v = txt(e[campo]);\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  const m = v.match(/^(\\d{1,2})(?::(\\d{2}))?(?::\\d{2})?\\s*(?:hs?)?$/i);\n  const h = m ? `${m[1].padStart(2, '0')}:${m[2] || '00'}` : v;\n  if (!HORARIOS.includes(h)) errores.push(`${campo}: \"${v}\" no es un horario de cita (${HORARIOS.join(', ')})`);\n  return h;\n}\n\nfunction horaPasada(fecha, hora) {\n  return fecha === hoy && hora && hora <= ahora.toFormat('HH:mm');\n}\n\nfunction leerArea(campo, requerido = true) {\n  const v = txt(e[campo]).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.includes('soporte') || v.includes('manten')) return 'Soporte y Mantenimiento';\n  if (v.includes('consult') || v.includes('general')) return 'Consultoría General';\n  errores.push(`${campo}: área \"${txt(e[campo])}\" desconocida, usar \"Consultoría General\" o \"Soporte y Mantenimiento\"`);\n  return '';\n}\n\nfunction leerTexto(campo, max, requerido = true) {\n  const v = txt(e[campo]).replace(/[<>]/g, '').replace(/\\s+/g, ' ');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length > max) errores.push(`${campo}: máximo ${max} caracteres`);\n  return v;\n}\n\nfunction leerTelefono(campo, requerido = true) {\n  const v = txt(e[campo]).replace(/[^\\d+]/g, '');\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length < 6 || v.length > 20) errores.push(`${campo}: teléfono inválido`);\n  return v;\n}\n\nfunction leerCorreo(campo, requerido = true) {\n  const v = txt(e[campo]).toLowerCase();\n  if (!v) { if (requerido) faltan.push(campo); return ''; }\n  if (v.length > 200 || !/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(v)) errores.push(`${campo}: correo inválido`);\n  return v;\n}\n\nconst masUnaHora = (h) => (h ? DateTime.fromFormat(h, 'HH:mm').plus({ hours: 1 }).toFormat('HH:mm') : '');\nconst legible = (f) => (f ? DateTime.fromISO(f, { zone: ZONA }).setLocale('es').toFormat(\"cccc d 'de' LLLL 'de' yyyy\") : '');\nconst iso = (f, h, minutos = 0) => (f && h ? DateTime.fromISO(`${f}T${h}`, { zone: ZONA }).plus({ minutes: minutos }).toISO() : '');\n\nfunction resultado(params, extra = {}) {\n  const valido = faltan.length === 0 && errores.length === 0;\n  const partes = [];\n  if (faltan.length) partes.push('Faltan datos: ' + faltan.join(', '));\n  if (errores.length) partes.push(errores.join('; '));\n  return [{ json: {\n    valido,\n    codigo: valido ? 'ok' : 'datos_invalidos',\n    mensaje: partes.join('. '),\n    campos_faltantes: faltan,\n    errores,\n    params,\n    ...extra,\n    canal: txt(e.canal),\n    session_id: txt(e.session_id),\n    inicio: ahora.toISO(),\n  } }];\n}\n\n// ----- validación específica de este workflow -----\n\nconst fecha = leerFecha('fecha');\nconst area = leerArea('area', false);\nconst motivo = problemaDiaHabil(fecha);\nreturn resultado({ cedula: '', fecha, area }, {\n  dia_habil: !motivo,\n  motivo,\n  dia_semana: fecha ? DateTime.fromISO(fecha, { zone: ZONA }).setLocale('es').toFormat('cccc') : '',\n  fecha_legible: legible(fecha),\n});\n"
+      },
+      "id": "2dafffb9-ea73-5684-bd8f-77a278a53481",
+      "name": "Validar Entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "notesInFlow": false,
+      "notes": "Why Code: validación y normalización de varios campos en un solo nodo"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eca95d5f-2eca-553c-af06-54fcee275903",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2def55a5-2c39-593e-beb5-0680e38d195d",
+      "name": "¿Datos válidos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b8c6a936-3dff-578c-a5b2-3012a99c7e99",
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "5c6f7aa1-0987-57c7-8340-d1e04070c1d8",
+              "name": "codigo",
+              "value": "={{ $json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "1706e232-472b-5583-9012-3c1c5afedae3",
+              "name": "mensaje",
+              "value": "={{ 'No se pudo procesar la solicitud. ' + $json.mensaje + '. Pedile al cliente el dato que falta o corregido.' }}",
+              "type": "string"
+            },
+            {
+              "id": "e157a3c6-d1be-528f-b9d0-a7020d5b4d81",
+              "name": "datos",
+              "value": "={{ { campos_faltantes: $json.campos_faltantes, errores: $json.errores } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1bba42d6-2754-52f5-adf8-9e286f9ad45f",
+      "name": "Resp: Datos inválidos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ccd70301-6007-56ac-b367-7c0fcae27f29",
+              "leftValue": "={{ $json.dia_habil }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c7f15fe6-57ac-5c19-ba57-bbe99edfcafd",
+      "name": "¿Día hábil?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j),\nslots(hora) AS (VALUES ('07:00'), ('08:00'), ('09:00'), ('10:00'), ('11:00'),\n                       ('13:00'), ('14:00'), ('15:00'), ('16:00'), ('17:00')),\nareas(area) AS (VALUES ('Consultoría General'), ('Soporte y Mantenimiento')),\npor_area AS (\n  SELECT ar.area,\n         COALESCE(json_agg(s.hora ORDER BY s.hora) FILTER (\n           WHERE NOT EXISTS (\n                   SELECT 1 FROM agendamientos a\n                   WHERE a.fecha = (p.j->>'fecha')::date AND a.area = ar.area\n                     AND a.hora_inicio = s.hora AND a.asistencia <> 'C')\n             AND ((p.j->>'fecha')::date + s.hora::time) > (now() AT TIME ZONE 'America/Asuncion')\n         ), '[]'::json) AS libres\n  FROM p, areas ar, slots s\n  WHERE COALESCE(p.j->>'area', '') = '' OR ar.area = p.j->>'area'\n  GROUP BY ar.area\n)\nSELECT json_object_agg(area, libres ORDER BY area) AS disponibilidad,\n       COALESCE(sum(json_array_length(libres)), 0)::int AS total_disponibles\nFROM por_area",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('Validar Entrada').first().json.params) }}"
+        }
+      },
+      "id": "e31222bf-e5a5-5988-ad89-860aa5f0a05d",
+      "name": "Buscar Horarios Libres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "63f712b4-c602-5edd-8679-87daa6d33aa3",
+              "name": "success",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "8abcdd28-9df4-546f-be2c-e68501e78995",
+              "name": "codigo",
+              "value": "={{ $json.total_disponibles ? 'ok' : 'sin_horarios' }}",
+              "type": "string"
+            },
+            {
+              "id": "9429076d-c59f-5fe8-ac83-59456d5f8c5f",
+              "name": "mensaje",
+              "value": "={{ $json.total_disponibles ? 'Horarios libres para el ' + $('Validar Entrada').first().json.fecha_legible + '. Ofrecé solo estos horarios.' : 'El ' + $('Validar Entrada').first().json.fecha_legible + ' no quedan horarios libres. Ofrecé otra fecha.' }}",
+              "type": "string"
+            },
+            {
+              "id": "a8195612-9bbb-5c0a-9bb3-f8ad147006ce",
+              "name": "datos",
+              "value": "={{ { fecha: $('Validar Entrada').first().json.params.fecha, dia_semana: $('Validar Entrada').first().json.dia_semana, dia_habil: true, disponibilidad: $json.disponibilidad, total_disponibles: $json.total_disponibles } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d2543fcc-9dc3-56f1-abbf-f2ce1d611e7a",
+      "name": "Resp: Horarios",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1a69c1be-60f4-5d8b-b549-943381de112d",
+              "name": "success",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "850f9606-27b5-53d1-9585-e3e443a5d11c",
+              "name": "codigo",
+              "value": "dia_no_habil",
+              "type": "string"
+            },
+            {
+              "id": "f5defeb9-f32b-50cd-be12-2f27bd2e2547",
+              "name": "mensaje",
+              "value": "={{ 'No hay atención: ' + $json.motivo + '. Pedí otra fecha.' }}",
+              "type": "string"
+            },
+            {
+              "id": "ac0e59e2-b22b-55a3-b780-87e7d9407622",
+              "name": "datos",
+              "value": "={{ { fecha: $json.params.fecha, dia_semana: $json.dia_semana, dia_habil: false, disponibilidad: {}, total_disponibles: 0 } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0bbaea63-6541-5cda-9217-e8213833620f",
+      "name": "Resp: Día no hábil",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5f2985be-e20a-52c8-af82-1babe915665c",
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "168fcc2f-36ab-5219-af1b-533a615f1f9e",
+              "name": "codigo",
+              "value": "={{ JSON.stringify($json).includes('duplicate key') ? 'horario_ocupado' : 'error_bd' }}",
+              "type": "string"
+            },
+            {
+              "id": "5fa0745a-ec58-5070-9442-8c66b948bb76",
+              "name": "mensaje",
+              "value": "={{ JSON.stringify($json).includes('duplicate key') ? 'Ese horario acaba de ser ocupado por otra reserva. Ofrecé otro horario.' : 'Error técnico al acceder a la base de datos. Pedí disculpas y sugerí intentar de nuevo en unos minutos.' }}",
+              "type": "string"
+            },
+            {
+              "id": "899c8ae6-2531-5b6f-9659-d364ee0e5aa8",
+              "name": "datos",
+              "value": "={{ { error_tecnico: JSON.stringify($json).slice(0, 300) } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6a2eaf23-d478-5329-b3c7-2eeb9a5f64f1",
+      "name": "Resp: Error de base de datos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2d867e4b-5475-5e5f-a3ba-3651849d1503",
+              "name": "success",
+              "value": "={{ $json.success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "a5fd22fa-b980-5ee1-bc7d-aa0d246d6732",
+              "name": "codigo",
+              "value": "={{ $json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "459cb147-1b52-5b0d-bd34-2f5ad1c6eced",
+              "name": "mensaje",
+              "value": "={{ $json.mensaje }}",
+              "type": "string"
+            },
+            {
+              "id": "0d16a5e5-be30-573f-8991-a7d51ac9161f",
+              "name": "datos",
+              "value": "={{ $json.datos ?? {} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0ce2589c-c7e7-5def-85a5-003e72b73647",
+      "name": "Respuesta",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (SELECT $1::jsonb AS j)\nINSERT INTO metricas_operaciones\n  (operacion, workflow, canal, session_id, ejecucion_id, cedula, exito, codigo, mensaje, inicio, fin, detalle)\nSELECT j->>'operacion', j->>'workflow', NULLIF(j->>'canal', ''), NULLIF(j->>'session_id', ''),\n       j->>'ejecucion_id', NULLIF(j->>'cedula', ''), COALESCE((j->>'exito')::boolean, false),\n       j->>'codigo', left(j->>'mensaje', 2000),\n       COALESCE((j->>'inicio')::timestamptz, now()), GREATEST(COALESCE((j->>'fin')::timestamptz, now()), COALESCE((j->>'inicio')::timestamptz, now())),\n       j->'detalle'\nFROM p\nRETURNING id, duracion_ms",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ operacion: 'consultar_disponibilidad', workflow: $workflow.name, canal: $('Validar Entrada').first().json.canal, session_id: $('Validar Entrada').first().json.session_id, ejecucion_id: $execution.id, cedula: $('Validar Entrada').first().json.params.cedula ?? '', exito: $json.success, codigo: $json.codigo, mensaje: $json.mensaje, inicio: $('Validar Entrada').first().json.inicio, fin: $now.toISO(), detalle: $json.datos }) }}"
+        }
+      },
+      "id": "c5e59886-9f79-5ea8-a0da-af66dcf25bf7",
+      "name": "Registrar Métrica",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "UlGtn3m9UVQSeZw2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d97325aa-1375-5132-9c74-b7100e55e695",
+              "name": "success",
+              "value": "={{ $('Respuesta').first().json.success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f1a830b5-f068-5115-a20f-ce1fc27e37a8",
+              "name": "codigo",
+              "value": "={{ $('Respuesta').first().json.codigo }}",
+              "type": "string"
+            },
+            {
+              "id": "6dd66278-aa4e-5bb6-b1cf-7151b4e0b6b6",
+              "name": "mensaje",
+              "value": "={{ $('Respuesta').first().json.mensaje }}",
+              "type": "string"
+            },
+            {
+              "id": "ee6c90f1-d99a-513b-ba8e-552df53ea61c",
+              "name": "datos",
+              "value": "={{ $('Respuesta').first().json.datos }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "207a38a7-1319-5e69-8941-f086b17fbed0",
+      "name": "Return",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Validar Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Entrada": {
+      "main": [
+        [
+          {
+            "node": "¿Datos válidos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Datos válidos?": {
+      "main": [
+        [
+          {
+            "node": "¿Día hábil?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Datos inválidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Día hábil?": {
+      "main": [
+        [
+          {
+            "node": "Buscar Horarios Libres",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Día no hábil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Horarios Libres": {
+      "main": [
+        [
+          {
+            "node": "Resp: Horarios",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resp: Error de base de datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Registrar Métrica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Métrica": {
+      "main": [
+        [
+          {
+            "node": "Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Horarios": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Día no hábil": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Error de base de datos": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resp: Datos inválidos": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "c6d2e4b8-d7ba-4177-8714-81a8ee7c1ae7",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "4SYX6L8ACbVe3mZ0",
+  "tags": []
+}

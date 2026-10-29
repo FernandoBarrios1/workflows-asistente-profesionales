@@ -1,0 +1,457 @@
+{
+  "name": "Agente MyF_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Agente MyF_v2 (Telegram)\nRecibe texto o audio (audio → transcripción Whisper), muestra \"escribiendo…\" y llama al **Núcleo Agente MyF_v2**. Otros tipos de mensaje (fotos, stickers…) reciben una respuesta en vez de ignorarse.\n\nLa sesión de memoria es el chat_id (igual que la v1). El tiempo medido arranca cuando el usuario envió el mensaje.\n\n⚠️ Un bot de Telegram admite un solo webhook: activar este workflow desactiva el trigger del 'Agente MyF' original.",
+        "height": 360,
+        "width": 600,
+        "color": 7
+      },
+      "id": "22ce4636-93ca-596a-ad4a-e3a32e4eea96",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "ee2f94c8-f65c-55de-a06e-a916e12a2d73",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "5e1c2b7d-9a4f-4c3e-8f6a-1b2d3c4e5f60",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Texto"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1",
+                    "leftValue": "={{ $json.message.voice }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Audio"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Otro"
+        }
+      },
+      "id": "13ebe597-0517-5d74-bc17-e131f797b988",
+      "name": "Tipo de mensaje",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      },
+      "id": "11918e72-2a2c-5b8c-8578-ce87b1807880",
+      "name": "Descargar Audio",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        208
+      ],
+      "webhookId": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {
+          "language": "es"
+        }
+      },
+      "id": "fb2ceb70-b511-5002-9d35-71ee22d5e26e",
+      "name": "Transcribir Audio",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        720,
+        208
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "Ykoevqs6Y6OSsWWk",
+          "name": "open ai Fer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendChatAction",
+        "chatId": "={{ $('Telegram').first().json.message.chat.id }}"
+      },
+      "id": "02b71d2e-521f-537b-bbff-cd60bdfff417",
+      "name": "Escribiendo…",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        0
+      ],
+      "webhookId": "3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bwDWcD34BAopV3Qe",
+          "mode": "list",
+          "cachedResultName": "Núcleo Agente MyF_v2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "mensaje": "={{ $('Transcribir Audio').isExecuted ? $('Transcribir Audio').first().json.text : $('Telegram').first().json.message.text }}",
+            "session_id": "={{ String($('Telegram').first().json.message.chat.id) }}",
+            "canal": "telegram",
+            "nombre_contacto": "={{ $('Telegram').first().json.message.from.first_name ?? '' }}",
+            "inicio": "={{ DateTime.fromSeconds($('Telegram').first().json.message.date).toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "mensaje",
+              "displayName": "mensaje",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "canal",
+              "displayName": "canal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "nombre_contacto",
+              "displayName": "nombre_contacto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "a55273e1-9ea3-589f-bd14-a15b71406ace",
+      "name": "Núcleo Agente MyF",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram').first().json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "997f6b74-b421-5c29-97c4-88d5a9b7710b",
+      "name": "Enviar Respuesta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "webhookId": "757eeeb0-66e6-5f30-a038-a3068600e1d8",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram').first().json.message.chat.id }}",
+        "text": "Disculpá, tuve un problema técnico. ¿Podés intentar de nuevo en unos minutos?",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ae6d938e-7cbf-512f-972e-8586cfcbe8bb",
+      "name": "Enviar Contingencia",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1440,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "webhookId": "8526e2bd-581e-5ca7-b0b5-654dcc023c67",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram').first().json.message.chat.id }}",
+        "text": "Por ahora solo puedo leer mensajes de texto o audios. ¿En qué te puedo ayudar?",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "576c2c8a-5114-5e89-8de1-7c5184c66544",
+      "name": "Responder Tipo No Soportado",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        448
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "webhookId": "0c849c95-6687-53ad-b1e0-36d94d35ef5d",
+      "credentials": {
+        "telegramApi": {
+          "id": "SRD3YfNqKHKQKTa4",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram": {
+      "main": [
+        [
+          {
+            "node": "Tipo de mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tipo de mensaje": {
+      "main": [
+        [
+          {
+            "node": "Escribiendo…",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Descargar Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Tipo No Soportado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar Audio": {
+      "main": [
+        [
+          {
+            "node": "Transcribir Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribir Audio": {
+      "main": [
+        [
+          {
+            "node": "Escribiendo…",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribiendo…": {
+      "main": [
+        [
+          {
+            "node": "Núcleo Agente MyF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Núcleo Agente MyF": {
+      "main": [
+        [
+          {
+            "node": "Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Contingencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Asuncion",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "vbDQAibUnNHQPwRg",
+    "availableInMCP": false
+  },
+  "versionId": "dc41c6e7-59ad-45a2-bdad-f9825e09a849",
+  "meta": {
+    "instanceId": "c467a666a0144921e22ee6f7c15165f09f51f1c53a5b412e0219a44d95e2815a"
+  },
+  "id": "qI3lCB8WDcqbOgv2",
+  "tags": []
+}
